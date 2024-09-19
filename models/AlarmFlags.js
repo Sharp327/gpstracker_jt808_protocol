@@ -6,126 +6,46 @@ const AlarmFlags = sequelize.define('AlarmFlags', {
         type: DataTypes.INTEGER,
         allowNull: false,
     },
-    emergencyAlarm: {
+    overspeedAlarm: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    overSpeedAlarm: {
+        allowNull: false,
+    }, // Bit 1
+    fatigueDriving: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    drivingAlarmMalfunction: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    riskWarning: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    gnssModuleMalfunction: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    gnssAntennaNotConnected: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    gnssAntennaShortCircuited: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
+        allowNull: false,
+    }, // Bit 2
     terminalMainPowerUndervoltage: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
+        allowNull: false,
+    }, // Bit 7
     terminalMainPowerOff: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    terminalLCDMalfunction: {
+        allowNull: false,
+    }, // Bit 8
+    highWaterTemperature: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    ttsModuleMalfunction: {
+        allowNull: false,
+    }, // Bit 12
+    idling: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    cameraMalfunction: {
+        allowNull: false,
+    }, // Bit 13
+    vibrationAlarm: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    roadTransportCertificateICCardModuleMalfunction: {
+        allowNull: false,
+    }, // Bit 16
+    sharpTurn: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    overSpeedWarning: {
+        allowNull: false,
+    }, // Bit 17
+    illegalVehicleMovement: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    fatigueDrivingWarning: {
+        allowNull: false,
+    }, // Bit 28
+    collisionAlarm: {
         type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    reserved1: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    accumulatedOverSpeedDrivingTime: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    timeoutParking: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    enterExitArea: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    enterExitRoute: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    drivingTimeOfRouteNotEnoughTooLong: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    offTrackAlarm: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    vehicleVSSMalfunction: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    abnormalFuelCapacity: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    vehicleStolen: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    illegalIgnition: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    illegalDisplacement: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    collisionWarning: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    rolloverWarning: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    illegalOpenDoors: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
+        allowNull: false,
+    },// Bit 29
 }, {
     tableName: 'alarm_flags',
 });

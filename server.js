@@ -1,5 +1,5 @@
 const app = require('./app');
-const tcpServer = require('./services/tcpServer');
+const { server: tcpServer } = require('./services/tcpServer');
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {

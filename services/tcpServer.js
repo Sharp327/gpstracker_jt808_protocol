@@ -6,7 +6,8 @@ const Position = require('../models/Position');
 const RawData = require('../models/RawData');
 const AlarmFlags = require('../models/AlarmFlags');
 const StatusFlags = require('../models/StatusFlags');
-const OBD_Data = require('../models/OBD_Data');
+const OBD_Data = require('../models/OBDData');
+const ExtendedData = require('../models/ExtendedData');
 
 // In-memory store for tracker states
 const trackerStates = {};
@@ -19,7 +20,7 @@ const server = net.createServer((socket) => {
             console.log("============================================");
             console.log("client:", data.toString('hex').toUpperCase());
             const parsedData = JT808Parser.parse(data);
-            // console.log("parsedData", parsedData);
+            console.log("parsedData", parsedData);
 
             const { messageId, deviceId, messageSequence } = parsedData;
             let result = 0x00;
@@ -36,6 +37,8 @@ const server = net.createServer((socket) => {
             if (!trackerStates[deviceId]) {
                 trackerStates[deviceId] = { registered: false, authenticated: false };
             }
+
+            trackerStates[deviceId].socket = socket;
 
             // Handle specific JT808 messages
             if (messageId === 0x0100) { // Terminal Registration
@@ -74,18 +77,12 @@ const server = net.createServer((socket) => {
                 const commonRequest = JT808Request.createJT808Message(deviceId, messageId, messageSequence, result);
                 console.log("server:", commonRequest.toString('hex').toUpperCase());
                 await socket.write(commonRequest);
-            } else if (messageId === 0x0200 || messageId === 0x0201) { // Location Information Report
-                await handleLocationReport(parsedData, socket);
+            } else if (messageId === 0x0200 || messageId === 0x0201 || messageId === 0x0202 || messageId === 0x0203) { // Location Information Report
+                await handleLocationReport(parsedData);
                 
                 const commonRequest = JT808Request.createJT808Message(deviceId, messageId, messageSequence, result);
                 console.log("server:", commonRequest.toString('hex').toUpperCase());
                 await socket.write(commonRequest);
-            // } else if (messageId === 0x0102) { // Handle other messages
-            //     sendSetParametersCommand(socket, deviceId, messageSequence);
-                
-            //     const commonRequest = JT808Request.createJT808Message(deviceId, messageId, messageSequence, result);
-            //     console.log("commonRequest:", commonRequest.toString('hex').toUpperCase());
-            //     await socket.write(commonRequest);
             } else if (messageId === 0x0F01) {
                 const calibration = 1; // Time calibration successful
                 const timestamp = getCurrentDateTimeBCDInGMT8(); // Timestamp in BCD format (YYMMDDhhmmss)
@@ -98,42 +95,25 @@ const server = net.createServer((socket) => {
                 await socket.write(commonRequest);
             } else if (messageId === 0x0001 || messageId === 0x0002) {
                 // if(messageId === 0x0001){
-                    const commonRequest = JT808Request.createJT808Message(deviceId, messageId, messageSequence, ((!trackerStates[deviceId].registered || !trackerStates[deviceId].authenticated) ? 0x01 : result));
-                    console.log("server:", commonRequest.toString('hex').toUpperCase());
-                    await socket.write(commonRequest);
-                // }
-                // if(messageId === 0x0002){
-                //     const requestMessage = JT808Request.createRequestTrackerAttribute(deviceId, messageSequence);
-                //     await socket.write(requestMessage);
-                //     console.log("server:", requestMessage.toString('hex')); // Output the message in hex format
-                // }
-
-                // const commandType = 0x04; // Command type for locking the car
-
-                // const requestMessage = JT808Request.createTerminalControlRequest(deviceId, messageSequence, commandType);
-                // await socket.write(requestMessage);
-                // console.log(requestMessage.toString('hex')); // Output the message in hex format
-
-                // =================
-                // const commandType = 0x04; // Command type for locking the car
-
-                // const requestMessage = JT808Request.createTerminalControlRequest(deviceId, messageSequence, commandType);
-                // console.log("createTerminalControlRequest", requestMessage.toString('hex')); // Output the message in hex format
-                // await socket.write(requestMessage);
-                
-                // const requestMessage = JT808Request.createRequestTrackerAttribute(deviceId, messageSequence);
-                // await socket.write(requestMessage);
-                // console.log("createRequestTrackerAttribute", requestMessage.toString('hex')); // Output the message in hex format
-                
-                // ===================
-                // const requestMessage = JT808Request.createRequestTrackerAttribute(deviceId, messageSequence);
-                // await socket.write(requestMessage);
-                // console.log("createRequestTrackerAttribute", requestMessage.toString('hex')); // Output the message in hex format
-                
+                const commonRequest = JT808Request.createJT808Message(deviceId, messageId, messageSequence, ((!trackerStates[deviceId].registered || !trackerStates[deviceId].authenticated) ? 0x01 : result));
+                console.log("server:", commonRequest.toString('hex').toUpperCase());
+                await socket.write(commonRequest);
                 // console.log(`Heartbeat message: 0x${messageId.toString(16).toUpperCase()}`);
+            } else if (messageId === 0x0107) {
+                await handleTrackAttributeReport(parsedData);
+                
+                const commonRequest = JT808Request.createJT808Message(deviceId, messageId, messageSequence, ((!trackerStates[deviceId].registered || !trackerStates[deviceId].authenticated) ? 0x01 : result));
+                console.log("server:", commonRequest.toString('hex').toUpperCase());
+                await socket.write(commonRequest);
             } else if (messageId === 0x0003) {
                 console.log("Tracker has logged out:", deviceId);
-                // Additional cleanup or processing logic here
+                const commonRequest = JT808Request.createJT808Message(deviceId, messageId, messageSequence, result);
+                console.log("server:", commonRequest.toString('hex').toUpperCase());
+                await socket.write(commonRequest);
+            } else {
+                const commonRequest = JT808Request.createJT808Message(deviceId, messageId, messageSequence, result);
+                console.log("server:", commonRequest.toString('hex').toUpperCase());
+                await socket.write(commonRequest);
             }
 
         } catch (error) {
@@ -155,20 +135,6 @@ const server = net.createServer((socket) => {
         console.error('Socket error:', err);
     });
 });
-
-function sendSetParametersCommand(socket, deviceId, messageSequence) {
-    // const parameters = Buffer.concat([
-    //     Buffer.from([0x00, 0x01, 0x01]), // Parameter ID and length for heartbeat interval
-    //     Buffer.from([0x0A]), // Heartbeat interval value (e.g., 10 seconds)
-    //     Buffer.from([0x00, 0x02, 0x01]), // Parameter ID and length for reporting interval or conditions
-    //     Buffer.from([0x30]), // Example value
-    // ]);
-    const parameters = Buffer.from('CQ'); // 'CQ' ASCII representation [43, 51]
-
-    const setParametersMessage = JT808Request.createSetParametersRequest(deviceId, messageSequence, parameters);
-    console.log('Sending set parameters command:', setParametersMessage.toString('hex').toUpperCase());
-    socket.write(setParametersMessage);
-}
 
 // Handle Terminal Registration (0x0100)
 async function handleTerminalRegistration(data) {
@@ -196,7 +162,7 @@ async function handleTerminalRegistration(data) {
                 terminalModel,
                 terminalId,
                 licensePlateColor,
-                VIN:licensePlate,
+                licensePlate,
             });
             console.log(`Device updated: ${deviceId}`);
         } else {
@@ -209,7 +175,7 @@ async function handleTerminalRegistration(data) {
                 terminalModel,
                 terminalId,
                 licensePlateColor,
-                VIN:licensePlate,
+                licensePlate,
             });
             console.log(`Device registered: ${deviceId}`);
         }
@@ -218,102 +184,58 @@ async function handleTerminalRegistration(data) {
     }
 }
 
-function sendReRegistrationRequest(socket, deviceId) {
-    const messageSequence = generateMessageSequence(); // Implement this function to generate a unique sequence number
-    const registrationRequest = JT808Request.createRegistrationRequest(deviceId, messageSequence);
+async function handleTrackAttributeReport(data) {
+    const {
+        deviceId,
+        simICCID
+    } = data;
 
-    console.log('Sending Terminal Registration Request (0x0100):', registrationRequest.toString('hex').toUpperCase());
-    socket.write(registrationRequest);
+    try {
+        const device = await Device.findOne({ where: { deviceId } });
+
+        if (device) {
+            if(simICCID){
+                await device.update({
+                    iccidCode: simICCID
+                });
+            }
+        }
+        
+    } catch (error) {
+        console.error('Error handling tracker attribute report:', error);
+    }
 }
 
 // Handle Location Information Report (0x0200)
-async function handleLocationReport(data, socket) {
+async function handleLocationReport(data) {
     const {
         deviceId,
+        alarmFlags,
+        statusFlags,
         latitude,
         longitude,
         altitude,
         speed,
         direction,
         timestamp,
-        alarmFlags,
-        statusFlags,
-        mileage,
-        fuelCapacity,
-        recordedSpeed,
-        alarmEventId,
-        overSpeedAlarmInfo,
-        areaRouteAlarmInfo,
-        drivingTimeAlarmInfo,
-        vehicleSignalStatus,
-        ioStatus,
-        analogData,
-        networkSignal,
-        gnssSatelliteCount,
-        batteryVoltage,
-        obdData,
-        messageSequence
+        extendedData
     } = data;
-
-    const {
-        emergencyAlarm,
-        overSpeedAlarm,
-        drivingAlarmMalfunction,
-        riskWarning,
-        gnssModuleMalfunction,
-        gnssAntennaNotConnected,
-        gnssAntennaShortCircuited,
-        terminalMainPowerUndervoltage,
-        terminalMainPowerOff,
-        terminalLCDMalfunction,
-        ttsModuleMalfunction,
-        cameraMalfunction,
-        roadTransportCertificateICCardModuleMalfunction,
-        overSpeedWarning,
-        fatigueDrivingWarning,
-        reserved1,
-        accumulatedOverSpeedDrivingTime,
-        timeoutParking,
-        enterExitArea,
-        enterExitRoute,
-        drivingTimeOfRouteNotEnoughTooLong,
-        offTrackAlarm,
-        vehicleVSSMalfunction,
-        abnormalFuelCapacity,
-        vehicleStolen,
-        illegalIgnition,
-        illegalDisplacement,
-        collisionWarning,
-        rolloverWarning,
-        illegalOpenDoors
-    } = alarmFlags;
-
-    const {
-        accOn,
-        positioning,
-        southLatitude,
-        westLongitude,
-        stopRunningStatus,
-        latitudeLongitudeEncrypted,
-        loadStatus,
-        oilLineDisconnect,
-        circuitDisconnect,
-        door1Open,
-        door2Open,
-        door3Open,
-        door4Open,
-        door5Open,
-        gpsPositioning,
-        beidouPositioning,
-        glonassPositioning,
-        galileoPositioning
-    } = statusFlags;
 
     try {
         // Find the device
         const device = await Device.findOne({ where: { deviceId } });
 
         if (device) {
+            if(extendedData.vinCode){
+                await device.update({
+                    VIN: extendedData.vinCode
+                });
+            }
+            if(extendedData.iccidCode){
+                await device.update({
+                    iccidCode: extendedData.iccidCode
+                });
+            }
             // Save the position to the database
             const positiondata = await Position.create({
                 device_id: device.id,
@@ -323,112 +245,31 @@ async function handleLocationReport(data, socket) {
                 speed,
                 direction,
                 timestamp,
-                mileage,
-                fuelCapacity,
-                recordedSpeed,
-                alarmEventId,
-                overSpeedAlarmInfo,
-                areaRouteAlarmInfo,
-                drivingTimeAlarmInfo,
-                vehicleSignalStatus,
-                ioStatus,
-                analogData,
-                networkSignal,
-                gnssSatelliteCount,
-                batteryVoltage
             });
 
             await AlarmFlags.create({
                 position_id: positiondata.id,
-                emergencyAlarm,
-                overSpeedAlarm,
-                drivingAlarmMalfunction,
-                riskWarning,
-                gnssModuleMalfunction,
-                gnssAntennaNotConnected,
-                gnssAntennaShortCircuited,
-                terminalMainPowerUndervoltage,
-                terminalMainPowerOff,
-                terminalLCDMalfunction,
-                ttsModuleMalfunction,
-                cameraMalfunction,
-                roadTransportCertificateICCardModuleMalfunction,
-                overSpeedWarning,
-                fatigueDrivingWarning,
-                reserved1,
-                accumulatedOverSpeedDrivingTime,
-                timeoutParking,
-                enterExitArea,
-                enterExitRoute,
-                drivingTimeOfRouteNotEnoughTooLong,
-                offTrackAlarm,
-                vehicleVSSMalfunction,
-                abnormalFuelCapacity,
-                vehicleStolen,
-                illegalIgnition,
-                illegalDisplacement,
-                collisionWarning,
-                rolloverWarning,
-                illegalOpenDoors
+                ...alarmFlags
             });
 
             await StatusFlags.create({
                 position_id: positiondata.id,
-                accOn,
-                positioning,
-                southLatitude,
-                westLongitude,
-                stopRunningStatus,
-                latitudeLongitudeEncrypted,
-                loadStatus,
-                oilLineDisconnect,
-                circuitDisconnect,
-                door1Open,
-                door2Open,
-                door3Open,
-                door4Open,
-                door5Open,
-                gpsPositioning,
-                beidouPositioning,
-                glonassPositioning,
-                galileoPositioning
+                ...statusFlags
             });
 
-            if(obdData)
+            if(extendedData.OBDData){
                 await OBD_Data.create({
                     position_id: positiondata.id,
-                    vehicleSpeed: obdData.vehicleSpeed??null,
-                    engineSpeed: obdData.engineSpeed??null,
-                    obdBatteryVoltage: obdData.obdBatteryVoltage??null,
-                    totalMileage: obdData.totalMileage??null,
-                    idleFuelConsumption: obdData.idleFuelConsumption??null,
-                    drivingFuelConsumption: obdData.drivingFuelConsumption??null,
-                    engineLoad: obdData.engineLoad??null,
-                    coolantTemperature: obdData.coolantTemperature??null,
-                    intakeManifoldPressure: obdData.intakeManifoldPressure??null,
-                    inletAirTemperature: obdData.inletAirTemperature??null,
-                    inletAirFlow: obdData.inletAirFlow??null,
-                    absoluteThrottlePosition: obdData.absoluteThrottlePosition??null,
-                    ignitionAdvanceAngle: obdData.ignitionAdvanceAngle??null,
-                    vehicleVIN: obdData.vehicleVIN??null,
-                    vehicleFaultCodes: obdData.vehicleFaultCodes??null,
-                    tripID: obdData.tripID??null
+                    ...extendedData.OBDData
                 });
+            }
 
-            // console.log(`Position saved for device: ${deviceId}`);
-        } else {
-            const registrationResponse = JT808Request.createRegistrationResponse(deviceId, messageSequence, 0x02, "");
-            console.log("Registration Response:", registrationResponse.toString('hex').toUpperCase());
-            await socket.write(registrationResponse);
-            sendSetParametersCommand(socket, deviceId, messageSequence);
+            await ExtendedData.create({
+                position_id: positiondata.id,
+                ...extendedData,
+            });
 
-            const commandType = 0x04; // Command type for locking the car
-
-            const requestMessage = JT808Request.createTerminalControlRequest(deviceId, messageSequence, commandType);
-            await socket.write(requestMessage);
-            console.log(requestMessage.toString('hex')); // Output the message in hex format
-
-            console.warn(`Device not found: ${deviceId}`);
+            console.log(`Position saved for device: ${deviceId}`);
         }
     } catch (error) {
         console.error('Error handling location report:', error);
@@ -464,4 +305,7 @@ function getCurrentDateTimeBCDInGMT8() {
     return bcdDateTime;
 }
 
-module.exports = server;
+module.exports = {
+    server,
+    trackerStates // Export trackerStates for use in other parts of the application
+};

@@ -1,4 +1,5 @@
 const net = require('net');
+const iconv = require('iconv-lite');
 
 class JT808Request {
     static createPositionRequest(deviceId, sequenceNumber) {
@@ -163,6 +164,52 @@ class JT808Request {
         // Handle escape characters (optional but recommended)
         // message = this.escapeMessage(message);
         
+        return message;
+    }
+
+    static createSendTextInformationRequest(deviceId, sequenceNumber, signBits, textMessage) {
+        const messageId = Buffer.from([0x83, 0x00]); // Message ID: 0x8300
+    
+        // Sign byte based on the bit flags (emergency, display, TTS, etc.)
+        const signByte = Buffer.from([signBits]);
+    
+        // Encode the text message in GBK (GB18030 is an extended version of GBK, use iconv-lite for encoding)
+        const textBuffer = iconv.encode(textMessage, 'gbk');
+        const textLength = textBuffer.length;
+    
+        if (textLength > 1024) {
+            throw new Error('Text message exceeds the maximum allowed length of 1024 bytes.');
+        }
+    
+        // Concatenate the sign byte and the text message
+        const body = Buffer.concat([signByte, textBuffer]);
+    
+        const deviceIdBuffer = Buffer.from(deviceId, 'hex'); // Terminal ID as 6-byte hex
+        const seqNumber = Buffer.alloc(2);
+        seqNumber.writeUInt16BE(sequenceNumber, 0);
+    
+        // Message Body Properties (length of the body)
+        const messageBodyProperties = Buffer.alloc(2);
+        messageBodyProperties.writeUInt16BE(body.length, 0); // Set body length to the length of sign byte + text
+    
+        // Build the entire header
+        const header = Buffer.concat([messageId, messageBodyProperties, deviceIdBuffer, seqNumber]);
+    
+        // Concatenate header and body
+        const fullMessage = Buffer.concat([header, body]);
+    
+        // Calculate checksum (XOR of all bytes except the start and end markers)
+        let checksum = 0;
+        for (let i = 0; i < fullMessage.length; i++) {
+            checksum ^= fullMessage[i];
+        }
+    
+        // Append the checksum and end marker
+        let message = Buffer.concat([Buffer.from([0x7E]), fullMessage, Buffer.from([checksum]), Buffer.from([0x7E])]);
+    
+        // Handle escape characters (optional but recommended)
+        // message = this.escapeMessage(message);
+    
         return message;
     }
 

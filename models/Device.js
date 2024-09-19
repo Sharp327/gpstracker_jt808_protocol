@@ -13,7 +13,15 @@ const Device = sequelize.define('Device', {
     terminalModel: DataTypes.STRING,
     terminalId: DataTypes.STRING,
     licensePlateColor: DataTypes.INTEGER,
-    VIN: DataTypes.STRING,
+    licensePlate: DataTypes.STRING,
+    VIN: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    iccidCode: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
 }, {
     tableName: 'devices',
 });

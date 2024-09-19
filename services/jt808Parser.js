@@ -46,6 +46,9 @@ class JT808Parser {
                 };
                 break;
             case 512:
+            case 513:
+            case 514:
+            case 515:
                 parsedData = {
                     ...parsedData,
                     ...this.parseLocationInfo(packetBody.slice(12)),
@@ -56,15 +59,15 @@ class JT808Parser {
                     ...parsedData,
                 };
                 break;
-            case 513:
-                const responseSerialNumber = packetBody.slice(12).readUInt16BE(0); // Response Serial Number (2 bytes)
-                const locationInfoData = packetBody.slice(12).slice(2);
-                parsedData = {
-                    ...parsedData,
-                    responseSerialNumber,
-                    ...this.parseLocationInfo(locationInfoData),
-                };
-                break;
+            // case 513:
+            //     const responseSerialNumber = packetBody.slice(12).readUInt16BE(0); // Response Serial Number (2 bytes)
+            //     const locationInfoData = packetBody.slice(12).slice(2);
+            //     parsedData = {
+            //         ...parsedData,
+            //         responseSerialNumber,
+            //         ...this.parseLocationInfo(locationInfoData),
+            //     };
+            //     break;
 
             case 258: // Terminal Registration Response
                 parsedData = {
@@ -152,50 +155,92 @@ class JT808Parser {
 
     static parseRequestTrackerAttributeResponse(data) {
         let offset = 0;
-        const deviceType = data.readUInt16BE(offset); // Device Type (2 bytes)
+    
+        // Terminal Type (WORD - 2 bytes)
+        const terminalType = data.readUInt16BE(offset);
         offset += 2;
     
-        const factoryId = data.slice(offset, offset + 5).toString('ascii'); // Factory ID (5 bytes)
+        // Manufacturer ID (BYTE[5] - 5 bytes, ASCII)
+        const manufacturerId = data.slice(offset, offset + 5).toString('ascii');
         offset += 5;
     
-        const terminalId = data.slice(offset, offset + 20).toString('hex'); // Terminal ID (20 bytes)
+        // Terminal Model (BYTE[20] - 20 bytes, ASCII)
+        const terminalModel = data.slice(offset, offset + 20).toString('ascii').replace(/\0/g, ''); // Removing null bytes
         offset += 20;
     
-        const manufactureId = data.slice(offset, offset + 7).toString('ascii'); // Manufacture ID (7 bytes)
+        // Terminal ID (BYTE[7] - 7 bytes, ASCII)
+        const terminalId = data.slice(offset, offset + 7).toString('ascii').replace(/\0/g, '');
         offset += 7;
     
-        const simICCID = data.slice(offset, offset + 10).toString('hex'); // SIM ICCID (10 bytes BCD)
+        // SIM ICCID (BCD[10] - 10 bytes)
+        const simICCID = data.slice(offset, offset + 10).toString('hex');
         offset += 10;
     
-        const hardwareVersionLength = data.readUInt8(offset); // Hardware version length (1 byte)
+        // Terminal Hardware Edition
+        const hardwareVersionLength = data.readUInt8(offset); // Length of the hardware version (1 byte)
         offset += 1;
-    
-        const hardwareVersion = data.slice(offset, offset + hardwareVersionLength).toString('ascii'); // Hardware version
+        const hardwareVersion = data.slice(offset, offset + hardwareVersionLength).toString('ascii');
         offset += hardwareVersionLength;
     
-        const softwareVersionLength = data.readUInt8(offset); // Software version length (1 byte)
+        // Terminal Firmware Version
+        const firmwareVersionLength = data.readUInt8(offset); // Length of the firmware version (1 byte)
+        offset += 1;
+        const firmwareVersion = data.slice(offset, offset + firmwareVersionLength).toString('ascii');
+        offset += firmwareVersionLength;
+    
+        // GNSS Module Type (1 byte flags)
+        const gnssModuleType = data.readUInt8(offset);
         offset += 1;
     
-        const softwareVersion = data.slice(offset, offset + softwareVersionLength).toString('ascii'); // Software version
-        offset += softwareVersionLength;
-    
-        const flag = data.readUInt8(offset); // Flag (1 byte)
+        // Communication Module (1 byte flags)
+        const communicationModule = data.readUInt8(offset);
         offset += 1;
     
-        const messageContent = data.slice(offset).toString('ascii'); // Message Content (GBK/ASCII)
+        // Parsing GNSS Module flags (bitwise operations)
+        const supportsGPS = (gnssModuleType & 0b00000001) !== 0;
+        const supportsBeidou = (gnssModuleType & 0b00000010) !== 0;
+        const supportsGLONASS = (gnssModuleType & 0b00000100) !== 0;
+        const supportsGalileo = (gnssModuleType & 0b00001000) !== 0;
+    
+        // Parsing Communication Module flags
+        const supportsGPRS = (communicationModule & 0b00000001) !== 0;
+        const supportsCDMA = (communicationModule & 0b00000010) !== 0;
+        const supportsTDSCDMA = (communicationModule & 0b00000100) !== 0;
+        const supportsWCDMA = (communicationModule & 0b00001000) !== 0;
+        const supportsCDMA2000 = (communicationModule & 0b00010000) !== 0;
+        const supportsTDLTE = (communicationModule & 0b00100000) !== 0;
+        const supportsOtherCommunication = (communicationModule & 0b10000000) !== 0;
+    
+        // Additional message content (GBK/ASCII)
+        const messageContent = data.slice(offset).toString('ascii');
     
         return {
-            deviceType,
-            factoryId,
+            terminalType,
+            manufacturerId,
+            terminalModel,
             terminalId,
-            manufactureId,
             simICCID,
             hardwareVersion,
-            softwareVersion,
-            flag,
+            firmwareVersion,
+            gnssModule: {
+                supportsGPS,
+                supportsBeidou,
+                supportsGLONASS,
+                supportsGalileo
+            },
+            communicationModule: {
+                supportsGPRS,
+                supportsCDMA,
+                supportsTDSCDMA,
+                supportsWCDMA,
+                supportsCDMA2000,
+                supportsTDLTE,
+                supportsOtherCommunication
+            },
             messageContent
         };
     }
+    
 
     static parseTerminalAuthentication(data) {
         const authenticationCode = data.toString('ascii'); // The entire body is the authentication code (string)
@@ -236,12 +281,11 @@ class JT808Parser {
         };
     }
 
-
     static parseLocationInfo(data) {
         if (data.length < 28) {
             throw new Error('Data length is too short for a position message.');
         }
-
+    
         // Fixed position data
         const alarmFlags = data.readUInt32BE(0); // Alarm Flags (4 bytes)
         const statusFlags = data.readUInt32BE(4); // Status Flags (4 bytes)
@@ -251,19 +295,19 @@ class JT808Parser {
         const speed = data.readUInt16BE(18) / 10; // Speed (2 bytes, scaled by 10 to get km/h)
         const direction = data.readUInt16BE(20); // Direction (2 bytes)
         const timestamp = this.parseTimestamp(data.slice(22, 28)); // BCD Timestamp (6 bytes)
-
+    
         // Parsing alarm flags
         const parsedAlarmFlags = this.parseAlarmFlags(alarmFlags);
-
+    
         // Parsing status flags
         const parsedStatusFlags = this.parseStatusFlags(statusFlags);
-
+    
         // Extended data parsing
         let extendedData = {};
         if (data.length > 28) {
             extendedData = this.parseExtendedData(data.slice(28));
         }
-
+    
         return {
             alarmFlags: parsedAlarmFlags,
             statusFlags: parsedStatusFlags,
@@ -273,7 +317,7 @@ class JT808Parser {
             speed,
             direction,
             timestamp,
-            ...extendedData
+            extendedData
         };
     }
 
@@ -299,36 +343,16 @@ class JT808Parser {
 
     static parseAlarmFlags(alarmFlags) {
         return {
-            emergencyAlarm: (alarmFlags & 0x00000001) !== 0,
-            overSpeedAlarm: (alarmFlags & 0x00000002) !== 0,
-            drivingAlarmMalfunction: (alarmFlags & 0x00000004) !== 0,
-            riskWarning: (alarmFlags & 0x00000008) !== 0,
-            gnssModuleMalfunction: (alarmFlags & 0x00000010) !== 0,
-            gnssAntennaNotConnected: (alarmFlags & 0x00000020) !== 0,
-            gnssAntennaShortCircuited: (alarmFlags & 0x00000040) !== 0,
-            terminalMainPowerUndervoltage: (alarmFlags & 0x00000080) !== 0,
-            terminalMainPowerOff: (alarmFlags & 0x00000100) !== 0,
-            terminalLCDMalfunction: (alarmFlags & 0x00000200) !== 0,
-            ttsModuleMalfunction: (alarmFlags & 0x00000400) !== 0,
-            cameraMalfunction: (alarmFlags & 0x00000800) !== 0,
-            roadTransportCertificateICCardModuleMalfunction: (alarmFlags & 0x00001000) !== 0,
-            overSpeedWarning: (alarmFlags & 0x00002000) !== 0,
-            fatigueDrivingWarning: (alarmFlags & 0x00004000) !== 0,
-            reserved1: (alarmFlags & 0x00008000) !== 0,
-            accumulatedOverSpeedDrivingTime: (alarmFlags & 0x00010000) !== 0,
-            timeoutParking: (alarmFlags & 0x00020000) !== 0,
-            enterExitArea: (alarmFlags & 0x00040000) !== 0,
-            enterExitRoute: (alarmFlags & 0x00080000) !== 0,
-            drivingTimeOfRouteNotEnoughTooLong: (alarmFlags & 0x00100000) !== 0,
-            offTrackAlarm: (alarmFlags & 0x00200000) !== 0,
-            vehicleVSSMalfunction: (alarmFlags & 0x00400000) !== 0,
-            abnormalFuelCapacity: (alarmFlags & 0x00800000) !== 0,
-            vehicleStolen: (alarmFlags & 0x01000000) !== 0,
-            illegalIgnition: (alarmFlags & 0x02000000) !== 0,
-            illegalDisplacement: (alarmFlags & 0x04000000) !== 0,
-            collisionWarning: (alarmFlags & 0x08000000) !== 0,
-            rolloverWarning: (alarmFlags & 0x10000000) !== 0,
-            illegalOpenDoors: (alarmFlags & 0x20000000) !== 0
+            overspeedAlarm: (alarmFlags & 0x00000001) !== 0, // Bit 1
+            fatigueDriving: (alarmFlags & 0x00000002) !== 0, // Bit 2
+            terminalMainPowerUndervoltage: (alarmFlags & 0x00000080) !== 0, // Bit 7
+            terminalMainPowerOff: (alarmFlags & 0x00000100) !== 0, // Bit 8
+            highWaterTemperature: (alarmFlags & 0x00001000) !== 0, // Bit 12
+            idling: (alarmFlags & 0x00002000) !== 0, // Bit 13
+            vibrationAlarm: (alarmFlags & 0x00010000) !== 0, // Bit 16
+            sharpTurn: (alarmFlags & 0x00020000) !== 0, // Bit 17
+            illegalVehicleMovement: (alarmFlags & 0x01000000) !== 0, // Bit 28
+            collisionAlarm: (alarmFlags & 0x02000000) !== 0 // Bit 29
         };
     }
 
@@ -356,71 +380,374 @@ class JT808Parser {
     }
 
     static parseExtendedData(data) {
-        const extendedData = {};
-        let offset = 0;
+        let index = 0;
+        const additionalInfo = {};
+    
+        while (index < data.length) {
+            const infoId = data.readUInt8(index); // Info ID (1 byte)
 
-        while (offset < data.length) {
-            const extendDataId = data.readUInt8(offset); // Extend Data ID (1 byte)
-            if(data.length < (offset + 1)) continue;
-            const length = data.readUInt8(offset + 1); // Length of Extend Data (1 byte)
-            if(data.length < (offset + 2 + length)) continue;
-            const infoData = data.slice(offset + 2, offset + 2 + length); // Extract the extended data
+            if(data.length < (index + 1)) continue;
+            const length = data.readUInt8(index + 1); // Length of Extend Data (1 byte)
+            if(data.length < (index + 2 + length)) continue;
+            const infoData = data.slice(index + 2, index + 2 + length); // Extract the extended data
 
-            switch (extendDataId) {
+            switch (infoId) {
                 case 0x01: // Mileage
-                    extendedData.mileage = infoData.readUInt32BE(0) / 10; // Mileage (DWORD, 1/10km)
+                    additionalInfo.mileage = infoData.readUInt32BE(0) / 10; // 1/10 km
                     break;
-                case 0x02: // Fuel capacity
-                    extendedData.fuelCapacity = infoData.readUInt16BE(0) / 10; // Fuel capacity (WORD, 1/10L)
+    
+                case 0x02: // Fuel level
+                    additionalInfo.fuelLevel = infoData.readUInt16BE(0) / 10; // 1/10 L
                     break;
-                case 0x03: // Speed from driving record
-                    extendedData.recordedSpeed = infoData.readUInt16BE(0) / 10; // Speed (WORD, 1/10km/h)
+    
+                case 0x03: // Speed from driving recorder
+                    additionalInfo.recorderSpeed = infoData.readUInt16BE(0) / 10; // 1/10 km/h
                     break;
-                case 0x04: // Alarm event ID
-                    extendedData.alarmEventId = infoData.readUInt16BE(0); // Alarm event ID (WORD)
+
+                case 0x04: // ID  of  the  alarm  event  needs  to  be  manually  confirmed
+                    additionalInfo.manualAlarmCount = infoData.readUInt16BE(0); // manual alarm count
                     break;
-                case 0x11: // Over speed alarm additional info
-                    extendedData.overSpeedAlarmInfo = this.parseOverSpeedAlarmInfo(infoData);
+
+                case 0x25: //  Extended  vehicle  signal  status  bit,  see  table  for  definition
+                    additionalInfo.vehicleSignalStatus = this.parseVehicleSignalStatus(infoData); // parse Vehicle Signal Status
                     break;
-                case 0x12: // Enter and exit area/route alarm info
-                    extendedData.areaRouteAlarmInfo = this.parseAreaRouteAlarmInfo(infoData);
+
+                case 0x2A: //  IO  status  bit,  see  Table  8-23  for  definition
+                    additionalInfo.IOStatus = this.parseIOStatus(infoData); // parse IO Status
                     break;
-                case 0x13: // Driving time of route alarm info
-                    extendedData.drivingTimeAlarmInfo = this.parseDrivingTimeAlarmInfo(infoData);
+
+                case 0x2B: //  Analog,  bit0-15, AD0;  bit16-31, AD1
+                    additionalInfo.analogBit = infoData.readUInt32BE(0); // analog bit
                     break;
-                case 0x25: // Expanded vehicle signal status
-                    extendedData.vehicleSignalStatus = this.parseVehicleSignalStatus(infoData);
+
+                case 0x30: // Wireless network signal strength
+                    additionalInfo.signalStrength = infoData.readUInt8(0);
                     break;
-                case 0x2A: // IO status
-                    extendedData.ioStatus = this.parseIOStatus(infoData);
+    
+                case 0x80: // Instantaneous speed
+                    additionalInfo.instantaneousSpeed = infoData.readUInt8(0); // km/h
                     break;
-                case 0x2B: // Analog data
-                    extendedData.analogData = infoData.toString('hex'); // Analog data (RAW)
+    
+                case 0x81: // Engine speed
+                    additionalInfo.engineSpeed = infoData.readUInt16BE(0); // RPM
                     break;
-                case 0x30: // Network signal strength
-                    extendedData.networkSignal = infoData.readUInt8(0); // Network signal (BYTE)
+    
+                case 0x82: // Battery voltage
+                    additionalInfo.batteryVoltage = infoData.readUInt16BE(0) / 10; // 0.1 V
                     break;
-                case 0x31: // GNSS satellite number
-                    extendedData.gnssSatelliteCount = infoData.readUInt8(0); // GNSS satellite count (BYTE)
+    
+                case 0x83: // Engine load
+                    additionalInfo.engineLoad = infoData.readUInt8(0); // percentage
                     break;
-                case 0xE3: // Battery Voltage
-                    extendedData.batteryVoltage = infoData.readUInt16BE(2) * 0.01; // Battery Voltage (WORD, 0.001V)
+    
+                case 0x84: // Coolant temperature
+                    additionalInfo.coolantTemperature = infoData.readUInt8(0) - 40; // Celsius
                     break;
-                case 0xF3: // OBD data
-                    extendedData.obdData = this.parseOBDData(infoData);
+    
+                case 0x85: // Instantaneous fuel consumption
+                    additionalInfo.instantaneousFuelConsumption = infoData.readUInt16BE(0); // ML/H
                     break;
+    
+                case 0x86: // Intake air temperature
+                    additionalInfo.intakeAirTemperature = infoData.readUInt8(0) - 40; // Celsius
+                    break;
+    
+                case 0x87: // Airflow
+                    additionalInfo.airflow = infoData.readUInt16BE(0); // g/s
+                    break;
+    
+                case 0x88: // Absolute manifold pressure
+                    additionalInfo.manifoldPressure = infoData.readUInt8(0); // kPa
+                    break;
+    
+                case 0x89: // Throttle position
+                    additionalInfo.throttlePosition = infoData.readUInt8(0); // percentage
+                    break;
+    
+                case 0x8A: // Fuel pressure
+                    additionalInfo.fuelPressure = infoData.readUInt16BE(0); // kPa
+                    break;
+    
+                case 0x8B: // VIN code
+                    additionalInfo.vinCode = infoData.slice(0, length).toString('ascii');
+                    break;
+    
+                case 0x8C: // Total mileage
+                    additionalInfo.totalMileage = infoData.readUInt32BE(0) / 10; // 1/10 km
+                    break;
+    
+                case 0x8D: // Remaining mileage
+                    additionalInfo.remainingMileage = infoData.readUInt16BE(0); // km
+                    break;
+    
+                case 0x8E: // Fuel level percentage
+                    additionalInfo.fuelLevelPercentage = infoData.readUInt8(0); // percentage
+                    break;
+    
+                case 0x8F: // Rapid accelerations during trip
+                    additionalInfo.rapidAccelerations = infoData.readUInt8(0); // count
+                    break;
+    
+                case 0x90: // Rapid decelerations during trip
+                    additionalInfo.rapidDecelerations = infoData.readUInt8(0); // count
+                    break;
+    
+                case 0x91: // Sharp turns during trip
+                    additionalInfo.sharpTurns = infoData.readUInt8(0); // count
+                    break;
+    
+                case 0x92: // Distance traveled during trip
+                    additionalInfo.distanceTraveled = infoData.readUInt32BE(0) / 10; // 1/10 km
+                    break;
+    
+                case 0x93: // Fuel consumption during trip
+                    additionalInfo.fuelConsumption = infoData.readUInt16BE(0); // ML
+                    break;
+    
+                case 0x94: // Average speed during trip
+                    additionalInfo.averageSpeed = infoData.readUInt16BE(0); // km/h
+                    break;
+    
+                case 0x95: // Maximum speed during trip
+                    additionalInfo.maxSpeed = infoData.readUInt16BE(0); // km/h
+                    break;
+    
+                case 0x96: // Overspeed events during trip
+                    additionalInfo.overspeedEvents = infoData.readUInt8(0); // count
+                    break;
+    
+                case 0x97: // Idle events during trip
+                    additionalInfo.idleEvents = infoData.readUInt8(0); // count
+                    break;
+    
+                case 0x98: // Total fuel consumption
+                    additionalInfo.totalFuelConsumption = infoData.readUInt32BE(0) / 10; // 1/10 L
+                    break;
+    
+                case 0x9F: // Base station information
+                    additionalInfo.baseStationInfo = this.parseBaseStationInfo(infoData); // Parse separately
+                    break;
+    
+                case 0xA0: // Fault code information
+                    additionalInfo.faultCodeInfo = this.parseFaultCodeInfo(infoData); // Parse separately
+                    break;
+    
+                case 0xCC: // ICCID code
+                    additionalInfo.iccidCode = infoData.slice(0, length).toString('ascii');
+                    break;
+
+                case 0xF3: // OBD Data
+                    additionalInfo.OBDData = this.parseOBDData(infoData);
+                    break;
+
                 default:
-                    extendedData[`custom_${extendDataId}`] = infoData.toString('hex'); // Custom or unknown extend data
-                    break;
+                    additionalInfo[`custom_${infoId}`] = infoData.toString('hex'); // Custom or unknown extend data
             }
-
-            // Move to the next extended data item
-            offset += 2 + length;
+    
+            index += 2 + length;
         }
-
-        return extendedData;
+    
+        return additionalInfo;
     }
 
+    static parseBaseStationInfo(data) {
+        const baseStationInfo = data.toString('ascii');
+        const parts = baseStationInfo.split(',');
+        return {
+            MCC: parts[0],
+            MNC: parts[1],
+            LAC: parts[2],
+            CELLID: parts[3],
+            SignalStrength: parts[4],
+            nearbyStations: parts.slice(5)
+        };
+    }
+    
+    static parseFaultCodeInfo(data) {
+        const faultCodeInfo = data.toString('ascii');
+        console.log("faultCodeInfo",faultCodeInfo);
+        return faultCodeInfo.split(',');
+    }
+    
+    static parseOBDData(data) {
+        let index = 0;
+        const additionalInfo = {};
+    
+        while (index < data.length) {
+            const infoId = data.readUInt16BE(index); // Info ID (WORD = 2 bytes)
+    
+            if (data.length < (index + 2)) continue;
+            const length = data.readUInt8(index + 2); // Length of Extend Data (BYTE = 1 byte)
+            if (data.length < (index + 3 + length)) continue;
+            const infoData = data.slice(index + 3, index + 3 + length); // Extract the extended data
+    
+            switch (infoId) {
+                case 0x0002: // Vehicle speed
+                    additionalInfo.vehicleSpeed = infoData.readUInt16BE(0) / 10; // 0.1 KM/H
+                    break;
+    
+                case 0x0003: // Engine speed
+                    additionalInfo.engineSpeed = infoData.readUInt16BE(0); // RPM
+                    break;
+    
+                case 0x0004: // Battery voltage
+                    additionalInfo.batteryVoltage = infoData.readUInt16BE(0) * 0.001; // 0.001 V
+                    break;
+    
+                case 0x0005: // Total vehicle mileage
+                    additionalInfo.totalMileage = infoData.readUInt32BE(0) / 10; // 0.1 KM
+                    break;
+    
+                case 0x0006: // Idle instantaneous fuel consumption
+                    additionalInfo.idleFuelConsumption = infoData.readUInt16BE(0) / 10; // 0.1 L/H
+                    break;
+    
+                case 0x0007: // Driving instantaneous fuel consumption
+                    additionalInfo.drivingFuelConsumption = infoData.readUInt16BE(0) / 10; // 0.1 L/100 KM
+                    break;
+    
+                case 0x0008: // Engine load
+                    additionalInfo.engineLoad = infoData.readUInt8(0); // 0-100 %
+                    break;
+    
+                case 0x0009: // Coolant temperature
+                    additionalInfo.coolantTemperature = infoData.readInt16BE(0) - 40; // -40 to 215 °C
+                    break;
+    
+                case 0x000B: // Intake manifold absolute pressure
+                    additionalInfo.intakeManifoldPressure = infoData.readUInt16BE(0); // 0-500 KPA
+                    break;
+    
+                case 0x000C: // Intake temperature
+                    additionalInfo.intakeTemperature = infoData.readInt16BE(0) - 40; // -40 to 215 °C
+                    break;
+    
+                case 0x000D: // Intake flow
+                    additionalInfo.intakeFlow = infoData.readUInt16BE(0) / 100; // 0-655.35 G/S
+                    break;
+    
+                case 0x000E: // Throttle position
+                    additionalInfo.throttlePosition = (infoData.readUInt8(0) * 100) / 255; // 0-100 %
+                    break;
+    
+                case 0x000F: // Ignition advance angle
+                    additionalInfo.ignitionAdvance = (infoData.readUInt8(0) * 0.5) - 64; // Degrees
+                    break;
+    
+                case 0x0050: // Vehicle VIN code
+                    additionalInfo.vinCode = infoData.toString('ascii'); // VIN code
+                    break;
+    
+                case 0x0051: // Vehicle fault code
+                    additionalInfo.faultCode = infoData.toString('hex'); // Fault code in hex
+                    break;
+    
+                case 0x0052: // Trip ID
+                    additionalInfo.tripId = infoData.readUInt32BE(0); // Trip ID
+                    break;
+    
+                case 0x0100: // Trip total mileage (from ignition to stop)
+                    additionalInfo.tripMileage = infoData.readUInt16BE(0) / 10; // 0.1 KM
+                    break;
+    
+                case 0x0101: // Total mileage since terminal connection
+                    additionalInfo.totalMileageSinceConnection = infoData.readUInt32BE(0) / 10; // 0.1 KM
+                    break;
+    
+                case 0x0102: // Trip total fuel consumption (from ignition to stop)
+                    additionalInfo.tripFuelConsumption = infoData.readUInt16BE(0) / 10; // 0.1 L
+                    break;
+    
+                case 0x0103: // Total fuel consumption since terminal connection
+                    additionalInfo.totalFuelConsumption = infoData.readUInt32BE(0) / 10; // 0.1 L
+                    break;
+    
+                case 0x0104: // Average fuel consumption for the trip
+                    additionalInfo.averageFuelConsumption = infoData.readUInt16BE(0) / 10; // 0.1 L/100 KM
+                    break;
+    
+                case 0x0105: // Overspeed duration for the trip
+                    additionalInfo.overspeedDuration = infoData.readUInt32BE(0); // Seconds
+                    break;
+    
+                case 0x0106: // High engine speed counts for the trip
+                    additionalInfo.highEngineSpeedCounts = infoData.readUInt16BE(0); // Counts
+                    break;
+    
+                case 0x0107: // High engine speed duration for the trip
+                    additionalInfo.highEngineSpeedDuration = infoData.readUInt32BE(0); // Seconds
+                    break;
+    
+                case 0x0108: // Excessive idle counts for the trip
+                    additionalInfo.excessiveIdleCounts = infoData.readUInt16BE(0); // Counts
+                    break;
+    
+                case 0x0109: // Total idle duration for the trip
+                    additionalInfo.totalIdleDuration = infoData.readUInt32BE(0); // Seconds
+                    break;
+    
+                case 0x010A: // Total idle fuel consumption for the trip
+                    additionalInfo.totalIdleFuelConsumption = infoData.readUInt16BE(0) / 10; // 0.1 L
+                    break;
+    
+                case 0x010B: // Fatigue driving total duration for the trip
+                    additionalInfo.fatigueDrivingDuration = infoData.readUInt32BE(0); // Seconds
+                    break;
+    
+                case 0x010C: // Average speed for the trip
+                    additionalInfo.averageTripSpeed = infoData.readUInt16BE(0) / 10; // 0.1 KM/H
+                    break;
+    
+                case 0x010D: // Maximum speed for the trip
+                    additionalInfo.maxTripSpeed = infoData.readUInt16BE(0) / 10; // 0.1 KM/H
+                    break;
+    
+                case 0x010E: // Maximum engine speed for the trip
+                    additionalInfo.maxEngineSpeed = infoData.readUInt16BE(0); // RPM
+                    break;
+    
+                case 0x010F: // Maximum engine water temperature for the trip
+                    additionalInfo.maxEngineWaterTemp = infoData.readInt16BE(0); // °C
+                    break;
+    
+                case 0x0110: // Maximum voltage for the trip
+                    additionalInfo.maxTripVoltage = infoData.readUInt16BE(0) * 0.001; // 0.001 V
+                    break;
+    
+                case 0x0111: // Overspeed count for the trip
+                    additionalInfo.overspeedCount = infoData.readUInt16BE(0); // Counts
+                    break;
+    
+                case 0x0112: // Sudden acceleration count for the trip
+                    additionalInfo.suddenAccelerationCount = infoData.readUInt16BE(0); // Counts
+                    break;
+    
+                case 0x0113: // Sudden deceleration count for the trip
+                    additionalInfo.suddenDecelerationCount = infoData.readUInt16BE(0); // Counts
+                    break;
+    
+                case 0x0114: // Sharp turn count for the trip
+                    additionalInfo.sharpTurnCount = infoData.readUInt16BE(0); // Counts
+                    break;
+    
+                case 0x0115: // Sudden lane change count for the trip
+                    additionalInfo.suddenLaneChangeCount = infoData.readUInt16BE(0); // Counts
+                    break;
+    
+                case 0x0116: // Sudden braking count for the trip
+                    additionalInfo.suddenBrakingCount = infoData.readUInt16BE(0); // Counts
+                    break;
+    
+                default:
+                    additionalInfo[`custom_${infoId.toString(16)}`] = infoData.toString('hex'); // Custom or unknown data
+            }
+    
+            index += 3 + length;
+        }
+    
+        return additionalInfo;
+    }
+    
     static parseOverSpeedAlarmInfo(data) {
         return {
             locationType: data.readUInt8(0), // Location type (BYTE)
@@ -472,87 +799,6 @@ class JT808Parser {
             dormancy: !!(bitmask & (1 << 1))
             // Handle other bits if necessary
         };
-    }
-
-    static parseOBDData(data) {
-        const obdData = {};
-        let offset = 0;
-    
-        while (offset < data.length) {
-            const obdId = data.readUInt16BE(offset); // OBD Data ID (2 bytes)
-            const length = data.readUInt8(offset + 2); // Length of OBD Data (1 byte)
-            const obdInfo = data.slice(offset + 3, offset + 3 + length); // Extract the OBD data
-    
-            switch (obdId) {
-                case 0x0002: // Vehicle speed
-                    obdData.vehicleSpeed = obdInfo.readUInt16BE(0) * 0.1; // Speed (0.1KM/H)
-                    break;
-                case 0x0003: // Engine speed
-                    obdData.engineSpeed = obdInfo.readUInt16BE(0); // RPM
-                    break;
-                case 0x0004: // Battery voltage
-                    obdData.obdBatteryVoltage = obdInfo.readUInt16BE(0) * 0.001; // Voltage (0.001V)
-                    break;
-                case 0x0005: // Total vehicle mileage
-                    obdData.totalMileage = obdInfo.readUInt32BE(0) * 0.1; // Mileage (0.1KM)
-                    break;
-                case 0x0006: // Instantaneous fuel consumption at idle speed
-                    obdData.idleFuelConsumption = obdInfo.readUInt16BE(0) * 0.1; // Fuel consumption (0.1L/H)
-                    break;
-                case 0x0007: // Instantaneous fuel consumption during driving
-                    obdData.drivingFuelConsumption = obdInfo.readUInt16BE(0) * 0.1; // Fuel consumption (0.1L/100KM)
-                    break;
-                case 0x0008: // Engine load
-                    obdData.engineLoad = obdInfo.readUInt8(0); // Load (0-100%)
-                    break;
-                case 0x0009: // Coolant temperature
-                    obdData.coolantTemperature = obdInfo.readInt16BE(0) - 40; // Temperature (-40 to 215°C)
-                    break;
-                case 0x000B: // Intake manifold absolute pressure
-                    obdData.intakeManifoldPressure = obdInfo.readUInt16BE(0); // Pressure (0-500 KPA)
-                    break;
-                case 0x000C: // Inlet air temperature
-                    obdData.inletAirTemperature = obdInfo.readInt16BE(0) - 40; // Temperature (-40 to 215°C)
-                    break;
-                case 0x000D: // Inlet air flow
-                    obdData.inletAirFlow = obdInfo.readUInt16BE(0) / 100; // Air flow (G/S)
-                    break;
-                case 0x000E: // Absolute throttle position
-                    obdData.absoluteThrottlePosition = obdInfo.readUInt8(0) * 100 / 255; // Throttle position (0-100%)
-                    break;
-                case 0x000F: // Ignition advance angle
-                    obdData.ignitionAdvanceAngle = (obdInfo.readUInt8(0) * 0.5) - 64; // Advance angle (degrees)
-                    break;
-                case 0x0050: // Vehicle VIN number
-                    obdData.vehicleVIN = obdInfo.toString('ascii'); // VIN number
-                    break;
-                case 0x0051: // Vehicle fault codes
-                    obdData.vehicleFaultCodes = this.parseFaultCodes(obdInfo); // Fault codes
-                    break;
-                case 0x0052: // The trip ID
-                    obdData.tripID = obdInfo.readUInt32BE(0); // Trip ID
-                    break;
-                // Handle other OBD data items here...
-                default:
-                    obdData[`custom_obd_${obdId.toString('hex')}`] = obdInfo.toString('hex'); // Custom or unknown OBD data
-                    break;
-            }
-    
-            // Move to the next OBD data item
-            offset += 3 + length;
-        }
-    
-        return obdData;
-    }
-    
-    static parseFaultCodes(data) {
-        // Example of parsing fault codes
-        const faultCodes = [];
-        for (let i = 0; i < data.length; i += 2) {
-            const code = data.readUInt16BE(i).toString(16).padStart(4, '0').toUpperCase();
-            faultCodes.push(code);
-        }
-        return faultCodes;
     }
 
 
