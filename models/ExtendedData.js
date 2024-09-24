@@ -154,7 +154,55 @@ const ExtendedData = sequelize.define('ExtendedData', {
     OBDData_id: {
         type: DataTypes.INTEGER,
         allowNull: true
-    }
+    },
+    numberOfGPSSatellites: {
+        type: DataTypes.INTEGER,
+        allowNull: true
+    },
+    temperatures: {
+        type: DataTypes.JSON,
+        allowNull: true
+    },
+    forwardReversal: {
+        type: DataTypes.INTEGER,
+        allowNull: true
+    },
+    baseStations: {
+        type: DataTypes.JSON,
+        allowNull: true
+    },
+    wifiData: {
+        type: DataTypes.JSON,
+        allowNull: true
+    },
+    internalBatteryPower: {
+        type: DataTypes.JSON,
+        allowNull: true
+    },
+    baseStations4G: {
+        type: DataTypes.JSON,
+        allowNull: true
+    },
+    mainPowerSupplyVoltage: {
+        type: DataTypes.FLOAT,
+        allowNull: true
+    },
+    fortificationState: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    extendedAlarm: {
+        type: DataTypes.JSON,
+        allowNull: true
+    },
+    gSensorData: {
+        type: DataTypes.JSON,
+        allowNull: true
+    },
+    wirelessDeviceMode: {
+        type: DataTypes.JSON,
+        allowNull: true
+    },
 }, {
     tableName: 'extended_data',
     timestamps: true // Add this if you want createdAt and updatedAt columns

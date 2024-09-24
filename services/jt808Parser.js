@@ -414,6 +414,115 @@ class JT808Parser {
                     additionalInfo.manualAlarmCount = infoData.readUInt16BE(0); // manual alarm count
                     break;
 
+                case 0x31: // Number of GPS satellites
+                    additionalInfo.numberOfGPSSatellites = infoData.readUInt8(0); // 1 byte
+                    break;
+    
+                case 0x51: // 16 bytes of 8-channel temperatures
+                    additionalInfo.temperatures = [];
+                    for (let i = 0; i < length / 2; i++) {
+                        additionalInfo.temperatures.push(infoData.readUInt16BE(i * 2));
+                    }
+                    break;
+    
+                case 0x52: // Forward reversal status
+                    additionalInfo.forwardReversal = infoData.readUInt8(0); // 1 byte
+                    break;
+    
+                case 0x53: // 2G base station data
+                    const numBaseStations = infoData.readUInt8(0);
+                    additionalInfo.baseStations = [];
+                    for (let i = 0; i < numBaseStations; i++) {
+                        const baseStation = {
+                            MCC: infoData.readUInt16BE(1 + i * 8),
+                            MNC: infoData.readUInt8(3 + i * 8),
+                            LAC: infoData.readUInt16BE(4 + i * 8),
+                            CELLID: infoData.readUInt16BE(6 + i * 8),
+                            signalStrength: infoData.readUInt8(8 + i * 8)
+                        };
+                        additionalInfo.baseStations.push(baseStation);
+                    }
+                    break;
+    
+                case 0x54: // Wi-Fi data
+                    const numWifi = infoData.readUInt8(0);
+                    additionalInfo.wifiData = [];
+                    for (let i = 0; i < numWifi; i++) {
+                        const wifi = {
+                            mac: infoData.slice(1 + i * 7, 1 + i * 7 + 6).toString('hex'), // WiFi MAC address (6 bytes)
+                            signalStrength: infoData.readUInt8(7 + i * 7) // Signal strength (1 byte)
+                        };
+                        additionalInfo.wifiData.push(wifi);
+                    }
+                    break;
+    
+                case 0x56: // Internal battery power
+                    additionalInfo.internalBatteryPower = {
+                        level: infoData.readUInt8(0), // Power level 0-10
+                        percentage: infoData.readUInt8(1) // Power percentage 1-100 (if supported)
+                    };
+                    break;
+    
+                case 0x5D: // 4G base station data
+                    const num4GBaseStations = infoData.readUInt8(0);
+                    additionalInfo.baseStations4G = [];
+                    for (let i = 0; i < num4GBaseStations; i++) {
+                        const baseStation4G = {
+                            MCC: infoData.readUInt16BE(1 + i * 10),
+                            MNC: infoData.readUInt8(3 + i * 10),
+                            LAC: infoData.readUInt16BE(4 + i * 10),
+                            CELLID: infoData.readUInt32BE(6 + i * 10),
+                            signalStrength: infoData.readUInt8(10 + i * 10)
+                        };
+                        additionalInfo.baseStations4G.push(baseStation4G);
+                    }
+                    break;
+    
+                case 0x61: // Main power supply voltage
+                    additionalInfo.mainPowerSupplyVoltage = infoData.readUInt16BE(0) * 0.01; // Voltage in 0.01V
+                    break;
+    
+                case 0xF1: // ICCID for terminal authentication
+                    additionalInfo.iccidCode = infoData
+                        .slice(0, length)
+                        .toString('ascii');
+                    break;
+    
+                case 0xF3: //  OBD Data | Fortification/withdrawal state
+                    if(length == 1){
+                        additionalInfo.fortificationState = infoData.readUInt8(0) === 0x01 ? 'fortification' : 'withdrawal';
+                    }else{
+                        additionalInfo.OBDData = this.parseOBDData(infoData);
+                    }
+                    break;
+    
+                case 0xF4: // Extended alarm bit (16 bits)
+                    additionalInfo.extendedAlarm = {
+                        accelerationAlarm: !!(infoData.readUInt16BE(0) & 0x0001),
+                        sharpDecelerationAlarm: !!(infoData.readUInt16BE(0) & 0x0002),
+                        suddenBrakeAlarm: !!(infoData.readUInt16BE(0) & 0x0004),
+                        sharpTurnAlarm: !!(infoData.readUInt16BE(0) & 0x0008),
+                        collisionAlarm: !!(infoData.readUInt16BE(0) & 0x0010),
+                        sideOverAlarm: !!(infoData.readUInt16BE(0) & 0x0020),
+                        highTemperatureAlarm: !!(infoData.readUInt16BE(0) & 0x0100)
+                    };
+                    break;
+    
+                case 0xF5: // 3-axis g-sensor data
+                    additionalInfo.gSensorData = {
+                        xAxis: infoData.readInt16BE(0), // X-axis data (2 bytes)
+                        yAxis: infoData.readInt16BE(2), // Y-axis data (2 bytes)
+                        zAxis: infoData.readInt16BE(4) // Z-axis data (2 bytes)
+                    };
+                    break;
+    
+                case 0xF6: // Wireless device working mode
+                    additionalInfo.wirelessDeviceMode = {
+                        deviceMode: infoData.readUInt8(0), // Device working mode
+                        positioningMode: infoData.readUInt8(1) // Positioning mode (e.g. Wi-Fi, GPS)
+                    };
+                    break;
+                    
                 case 0x25: //  Extended  vehicle  signal  status  bit,  see  table  for  definition
                     additionalInfo.vehicleSignalStatus = this.parseVehicleSignalStatus(infoData); // parse Vehicle Signal Status
                     break;
@@ -544,10 +653,6 @@ class JT808Parser {
                     additionalInfo.iccidCode = infoData
                         .slice(0, length)
                         .toString('ascii');
-                    break;
-
-                case 0xF3: // OBD Data
-                    additionalInfo.OBDData = this.parseOBDData(infoData);
                     break;
 
                 default:
