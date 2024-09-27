@@ -4,10 +4,6 @@ const JT808Request = require('./jt808Request');
 const Device = require('../models/Device');
 const Position = require('../models/Position');
 const RawData = require('../models/RawData');
-const AlarmFlags = require('../models/AlarmFlags');
-const StatusFlags = require('../models/StatusFlags');
-const OBD_Data = require('../models/OBDData');
-const ExtendedData = require('../models/ExtendedData');
 
 // In-memory store for tracker states
 const trackerStates = {};
@@ -25,16 +21,8 @@ const server = net.createServer((socket) => {
             const {messageId, deviceId, messageSequence} = parsedData;
             let result = 0x00;
 
-            //  Insert raw data into the database
-            await RawData.create({
-                deviceId: deviceId, // Default value or extracted from data
-                data: data
-                    .toString('hex')
-                    .toUpperCase(),
-                upload_public_ip: socket
-                    .remoteAddress
-                    .replace('::ffff:', '')
-            });
+            await handleRawDataReport(deviceId, data, socket.remoteAddress.replace('::ffff:', ''))
+
             // console.log(`RawData saved for device: ${deviceId}`); Initialize tracker
             // state if not present
             if (!trackerStates[deviceId]) {
@@ -221,32 +209,15 @@ async function handleTerminalRegistration(data) {
     try {
         // Check if the device already exists
         let device = await Device.findOne({where: {
-                deviceId
+                name: deviceId
             }});
 
-        if (device) {
-            // Update existing device
-            await device.update({
-                provinceId,
-                cityId,
-                manufacturerId,
-                terminalModel,
-                terminalId,
-                licensePlateColor,
-                licensePlate
-            });
-            console.log(`Device updated: ${deviceId}`);
-        } else {
-            // Create a new device
-            device = await Device.create({
-                deviceId,
-                provinceId,
-                cityId,
-                manufacturerId,
-                terminalModel,
-                terminalId,
-                licensePlateColor,
-                licensePlate
+        if (!device) {
+            await Device.create({
+                name: deviceId,
+                uniqueId: deviceId,
+                distance_unit: "km",
+                deviceType: getDeviceType(deviceId)
             });
             console.log(`Device registered: ${deviceId}`);
         }
@@ -255,22 +226,70 @@ async function handleTerminalRegistration(data) {
     }
 }
 
+function getDeviceType(deviceId){
+    switch (deviceId.substring(0, 2)) {
+        case '00':
+            return 'odb';
+        case '01':
+            return 'usb';
+        case '02':
+            return 'other1';
+        case '03':
+            return 'other2';
+        case '04':
+            return 'other3';
+        case '05':
+            return 'other4';
+        default:
+            return 'unknown';
+    }
+    
+}
 async function handleTrackAttributeReport(data) {
     const {deviceId, simICCID} = data;
 
     try {
         const device = await Device.findOne({where: {
-                deviceId
+                name: deviceId
             }});
 
         if (device) {
             if (simICCID) {
-                await device.update({iccidCode: simICCID});
+                await device.update({iccid: simICCID});
             }
         }
 
     } catch (error) {
         console.error('Error handling tracker attribute report:', error);
+    }
+}
+
+async function handleRawDataReport(deviceId, data, ipAddress){
+    try {
+        let device = await Device.findOne({where: {
+            name: deviceId
+        }});
+
+        if (!device) {
+            device = await Device.create({
+                name: deviceId,
+                uniqueId: deviceId,
+                distance_unit: "km",
+                deviceType: getDeviceType(deviceId)
+            });
+            console.log(`Device registered: ${deviceId}`);
+        }
+        //  Insert raw data into the database
+        await RawData.create({
+            deviceId: device.id, // Default value or extracted from data
+            data: data
+                .toString('hex')
+                .toUpperCase(),
+            upload_public_ip: ipAddress
+        });
+        
+    } catch (error) {
+        console.error('Error handling rawdata report:', error);
     }
 }
 
@@ -291,57 +310,83 @@ async function handleLocationReport(data) {
 
     try {
         // Find the device
-        const device = await Device.findOne({where: {
-                deviceId
-            }});
+        const device = await Device.findOne({ where: { name: deviceId } });
 
-        if (device) {
-            if (extendedData.vinCode) {
-                await device.update({VIN: extendedData.vinCode});
-            }
-            if (extendedData.OBDData) {
-                if (extendedData.OBDData.vinCode) {
-                    await device.update({VIN: extendedData.OBDData.vinCode});
-                }
-            }
-            if (extendedData.iccidCode) {
-                await device.update({iccidCode: extendedData.iccidCode});
-            }
-            // Save the position to the database
-            const positiondata = await Position.create({
-                device_id: device.id,
-                latitude,
-                longitude,
-                altitude,
-                speed,
-                direction,
-                timestamp
-            });
+        if (!device) return;
 
-            await AlarmFlags.create({
-                position_id: positiondata.id,
-                ...alarmFlags
-            });
+        // Prepare device update data
+        const updateDeviceData = {
+            vin: extendedData.vinCode || extendedData?.OBDData?.vinCode || device.vin,
+            iccid: extendedData.iccidCode || device.iccid,
+            odometer: extendedData.totalMileage || extendedData?.OBDData?.totalMileage || device.odometer || extendedData.mileage,
+            latitude,
+            longitude,
+            direction,
+            speed: extendedData.recorderspeed,
+            acc: statusFlags?.accOn,
+            signal: extendedData.signalStrength,
+            fuel: extendedData.fuellevel,
+            lastPosition: timestamp,
+            lastConnect: new Date(),
+            lastAcc: statusFlags?.accOn ? new Date() : device.lastAcc
+        };
 
-            await StatusFlags.create({
-                position_id: positiondata.id,
-                ...statusFlags
-            });
+        await device.update(updateDeviceData);
+        // atitude, longitude, speed, direction, acc, signal fuel
+        // Prepare position data
+        const createPositionData = {
+            deviceId: device.id,
+            latitude, longitude, altitude, direction,
+            deviceTime: timestamp,
+            speed: extendedData.recorderspeed,
+            batteryVoltage: extendedData.batteryVoltage || extendedData?.OBDData?.batteryVoltage,
+            signal_strength: extendedData.signalStrength,
+            fuel: extendedData.fuellevel,
+            engine_load: extendedData.engineLoad || extendedData?.OBDData?.engineLoad,
+            engine_speed: extendedData.engineSpeed || extendedData?.OBDData?.engineSpeed,
+            coolant_temp: extendedData.coolantTemperature || extendedData?.OBDData?.coolantTemperature,
+            odometer: extendedData.totalMileage || extendedData?.OBDData?.totalMileage || device.odometer || extendedData.mileage,
+            fuel_percent: extendedData.fuelLevelPercentage,
+            rapid_accel: extendedData.rapidAccelerations,
+            rapid_decel: extendedData.rapidDecelerations,
+            sharpturn: extendedData.sharpTurns,
+            avg_speed: extendedData.averageSpeed,
+            max_speed: extendedData.maxSpeed,
+            fault_code: extendedData.faultCodeInfo,
+            temp: extendedData.temperatures,
+            door: statusFlags?.door1Open,
+            idle: alarmFlags?.idling,
+            collision: alarmFlags?.collisionAlarm,
+            acc: statusFlags?.accOn,
+            disconnect: statusFlags?.circuitDisconnect
+        };
 
-            if (extendedData.OBDData) {
-                await OBD_Data.create({
-                    position_id: positiondata.id,
-                    ...extendedData.OBDData
-                });
-            }
+        // Save the position to the database
+        const positiondata = await Position.create(createPositionData);
 
-            await ExtendedData.create({
-                position_id: positiondata.id,
-                ...extendedData
-            });
+        // await AlarmFlags.create({
+        //     position_id: positiondata.id,
+        //     ...alarmFlags
+        // });
 
-            console.log(`Position saved for device: ${deviceId}`);
-        }
+        // await StatusFlags.create({
+        //     position_id: positiondata.id,
+        //     ...statusFlags
+        // });
+
+        // if (extendedData.OBDData) {
+        //     await OBD_Data.create({
+        //         position_id: positiondata.id,
+        //         ...extendedData.OBDData
+        //     });
+        // }
+
+        // await ExtendedData.create({
+        //     position_id: positiondata.id,
+        //     ...extendedData
+        // });
+
+        console.log(`Position saved for device: ${deviceId}`);
     } catch (error) {
         console.error('Error handling location report:', error);
     }
